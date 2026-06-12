@@ -45,6 +45,31 @@ func TestClientReadsBlameAndCommitFromTemporaryRepository(t *testing.T) {
 	}
 }
 
+func TestBlameLinePreservesUnicodeSourceFileAfterRename(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.name", "Test Author")
+	runGit(t, repo, "config", "user.email", "test@example.com")
+
+	source := filepath.Join(repo, "源文件.go")
+	if err := os.WriteFile(source, []byte("package hello\n\nconst Answer = 42\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "源文件.go")
+	runGit(t, repo, "commit", "-m", "Add answer")
+	runGit(t, repo, "mv", "源文件.go", "重命名.go")
+	runGit(t, repo, "commit", "-m", "Rename source file")
+
+	client := gitclient.Client{Dir: repo}
+	blame, err := client.BlameLine(context.Background(), "重命名.go", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blame.SourceFile != "源文件.go" {
+		t.Fatalf("source file = %q, want %q", blame.SourceFile, "源文件.go")
+	}
+}
+
 func TestReadContext(t *testing.T) {
 	repo := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repo, "sample.txt"), []byte("one\ntwo\nthree\n"), 0o600); err != nil {

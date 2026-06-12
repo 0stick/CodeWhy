@@ -120,7 +120,8 @@ func (c Client) run(ctx context.Context, args ...string) ([]byte, error) {
 		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 	}
-	cmd := exec.CommandContext(ctx, "git", args...)
+	gitArgs := append([]string{"-c", "core.quotePath=false"}, args...)
+	cmd := exec.CommandContext(ctx, "git", gitArgs...)
 	cmd.Dir = c.Dir
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
