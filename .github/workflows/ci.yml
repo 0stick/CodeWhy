@@ -27,3 +27,8 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
       - run: go build ./cmd/codewhy
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
