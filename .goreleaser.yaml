@@ -1,0 +1,42 @@
+version: 2
+
+project_name: codewhy
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: codewhy
+    main: ./cmd/codewhy
+    binary: codewhy
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X github.com/0stick/CodeWhy/internal/cli.version={{.Version}}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

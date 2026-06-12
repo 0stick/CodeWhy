@@ -1,0 +1,11 @@
+/bin/
+/dist/
+/.cache/
+/.gopath/
+*.exe
+*.test
+*.out
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

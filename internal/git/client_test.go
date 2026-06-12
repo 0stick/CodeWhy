@@ -1,0 +1,70 @@
+package git_test
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	gitclient "github.com/0stick/CodeWhy/internal/git"
+)
+
+func TestClientReadsBlameAndCommitFromTemporaryRepository(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.name", "Test Author")
+	runGit(t, repo, "config", "user.email", "test@example.com")
+
+	path := filepath.Join(repo, "hello world.go")
+	if err := os.WriteFile(path, []byte("package hello\n\nconst Answer = 42\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "hello world.go")
+	runGit(t, repo, "commit", "-m", "Explain the answer")
+
+	client := gitclient.Client{Dir: repo}
+	blame, err := client.BlameLine(context.Background(), "hello world.go", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blame.Code != "const Answer = 42" {
+		t.Fatalf("unexpected code: %q", blame.Code)
+	}
+
+	commit, err := client.Commit(context.Background(), blame.SHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commit.Author != "Test Author" || commit.Message != "Explain the answer" {
+		t.Fatalf("unexpected commit: %#v", commit)
+	}
+	if len(commit.Files) != 1 || commit.Files[0] != "hello world.go" {
+		t.Fatalf("unexpected files: %#v", commit.Files)
+	}
+}
+
+func TestReadContext(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "sample.txt"), []byte("one\ntwo\nthree\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := gitclient.ReadContext(repo, "sample.txt", 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 3 || !lines[1].Current || lines[1].Code != "two" {
+		t.Fatalf("unexpected context: %#v", lines)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
