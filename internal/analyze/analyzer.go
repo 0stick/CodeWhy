@@ -18,7 +18,7 @@ import (
 var issuePattern = regexp.MustCompile(`(?i)(?:\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s*:?\s*)?#([1-9][0-9]*)\b`)
 
 type Forge interface {
-	PullRequestForCommit(context.Context, github.Repository, string) (*model.Reference, error)
+	PullRequestsForCommit(context.Context, github.Repository, string) ([]model.Reference, error)
 	Issue(context.Context, github.Repository, int) (model.Reference, error)
 }
 
@@ -121,12 +121,14 @@ func (a *Analyzer) enrich(ctx context.Context, result *model.Result, options Opt
 
 	forge := a.NewForge(ctx)
 	logf(options, "querying GitHub for associated pull request")
-	pr, err := forge.PullRequestForCommit(ctx, repo, result.Commit.SHA)
+	pullRequests, err := forge.PullRequestsForCommit(ctx, repo, result.Commit.SHA)
 	if err != nil {
 		result.Warnings = append(result.Warnings, "GitHub enrichment unavailable: "+err.Error())
 		setReason(result)
 		return
 	}
+	result.PullRequests = pullRequests
+	pr := github.SelectPullRequest(pullRequests)
 	result.PullRequest = pr
 
 	text := result.Commit.Message
@@ -141,6 +143,9 @@ func (a *Analyzer) enrich(ctx context.Context, result *model.Result, options Opt
 		issue, issueErr := forge.Issue(ctx, repo, number)
 		if issueErr != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("could not load issue #%d: %v", number, issueErr))
+			continue
+		}
+		if issue.Kind == "pull_request" {
 			continue
 		}
 		result.Issues = append(result.Issues, issue)
@@ -187,6 +192,7 @@ func baseResult(commit model.Commit) model.Result {
 	return model.Result{
 		SchemaVersion: model.SchemaVersion,
 		Commit:        commit,
+		PullRequests:  []model.Reference{},
 		Issues:        []model.Reference{},
 		Warnings:      []string{},
 	}
