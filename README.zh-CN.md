@@ -118,6 +118,7 @@ JSON 数据结构带有版本号。集合字段在没有内容时输出空数组
     "date": "2024-08-12T10:30:00Z",
     "message": "Prevent duplicate token refresh requests",
     "diff": "...",
+    "diff_truncated": false,
     "files": ["src/auth.ts"],
     "url": "https://github.com/acme/app/commit/4f28c31..."
   },
@@ -128,6 +129,19 @@ JSON 数据结构带有版本号。集合字段在没有内容时输出空数组
     "url": "https://github.com/acme/app/pull/418",
     "state": "closed"
   },
+  "pull_requests": [
+    {
+      "number": 418,
+      "title": "Prevent concurrent token refresh",
+      "body": "Concurrent requests could invalidate each other's tokens.",
+      "url": "https://github.com/acme/app/pull/418",
+      "state": "closed",
+      "kind": "pull_request",
+      "merged": true,
+      "base_branch": "main",
+      "base_default": true
+    }
+  ],
   "issues": [],
   "reason": "Prevent concurrent token refresh. Concurrent requests could invalidate each other's tokens.",
   "confidence": "high",
