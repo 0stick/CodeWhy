@@ -61,6 +61,11 @@ func terminal(w io.Writer, result model.Result, color bool) error {
 				return err
 			}
 		}
+		if result.Target.Function != nil {
+			if _, err := fmt.Fprintf(w, "%s %s (lines %d-%d)\n", label("Function:"), result.Target.Function.Name, result.Target.Function.StartLine, result.Target.Function.EndLine); err != nil {
+				return err
+			}
+		}
 		for _, line := range result.Target.Context {
 			marker := " "
 			if line.Current {
@@ -112,6 +117,24 @@ func terminal(w io.Writer, result model.Result, color bool) error {
 				issueLabel = label("Related Issue:")
 			}
 			if _, err := fmt.Fprintf(w, "%s #%d %s\n%s %s\n", issueLabel, issue.Number, issue.Title, label("Issue URL:"), issue.URL); err != nil {
+				return err
+			}
+		}
+	}
+	if len(result.History) > 0 {
+		if _, err := fmt.Fprintf(w, "%s\n", label("History:")); err != nil {
+			return err
+		}
+		for _, entry := range result.History {
+			sha := entry.SHA
+			if len(sha) > 7 {
+				sha = sha[:7]
+			}
+			date := entry.Date
+			if len(date) >= 10 {
+				date = date[:10]
+			}
+			if _, err := fmt.Fprintf(w, "  %s %s %s by %s\n", sha, date, entry.Subject, entry.Author); err != nil {
 				return err
 			}
 		}

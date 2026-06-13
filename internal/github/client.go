@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -17,22 +19,41 @@ import (
 )
 
 type Client struct {
-	BaseURL    string
-	HTTPClient *http.Client
-	Token      string
+	BaseURL      string
+	HTTPClient   *http.Client
+	Token        string
+	CacheDir     string
+	CacheTTL     time.Duration
+	DisableCache bool
 }
 
 func NewClient(token string) *Client {
+	cacheDir := ""
+	if userCacheDir, err := os.UserCacheDir(); err == nil {
+		cacheDir = filepath.Join(userCacheDir, "codewhy", "github")
+	}
 	return &Client{
 		BaseURL: "https://api.github.com",
 		HTTPClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		Token: token,
+		Token:    token,
+		CacheDir: cacheDir,
+		CacheTTL: 15 * time.Minute,
 	}
 }
 
+func NewClientForRepository(token string, repo Repository) *Client {
+	client := NewClient(token)
+	client.BaseURL = repo.APIBaseURL()
+	return client
+}
+
 func ResolveToken(ctx context.Context) string {
+	return ResolveTokenForHost(ctx, "github.com")
+}
+
+func ResolveTokenForHost(ctx context.Context, host string) string {
 	if token := strings.TrimSpace(os.Getenv("CODEWHY_GITHUB_TOKEN")); token != "" {
 		return token
 	}
@@ -41,7 +62,11 @@ func ResolveToken(ctx context.Context) string {
 	}
 	tokenContext, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(tokenContext, "gh", "auth", "token")
+	args := []string{"auth", "token"}
+	if host != "" && !strings.EqualFold(host, "github.com") {
+		args = append(args, "--hostname", host)
+	}
+	cmd := exec.CommandContext(tokenContext, "gh", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -74,7 +99,14 @@ func (c *Client) Issue(ctx context.Context, repo Repository, number int) (model.
 }
 
 func (c *Client) get(ctx context.Context, path string, target any, accept string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.BaseURL, "/")+path, nil)
+	requestURL := strings.TrimRight(c.BaseURL, "/") + path
+	if data, ok := c.readCache(requestURL); ok {
+		if err := json.Unmarshal(data, target); err == nil {
+			return nil
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return fmt.Errorf("create GitHub request: %w", err)
 	}
@@ -100,10 +132,46 @@ func (c *Client) get(ctx context.Context, path string, target any, accept string
 		}
 		return fmt.Errorf("GitHub API returned %s: %s", response.Status, message)
 	}
-	if err := json.NewDecoder(response.Body).Decode(target); err != nil {
+	data, err := io.ReadAll(io.LimitReader(response.Body, (8<<20)+1))
+	if err != nil {
+		return fmt.Errorf("read GitHub response: %w", err)
+	}
+	if len(data) > 8<<20 {
+		return fmt.Errorf("GitHub response exceeds 8 MiB limit")
+	}
+	if err := json.Unmarshal(data, target); err != nil {
 		return fmt.Errorf("decode GitHub response: %w", err)
 	}
+	c.writeCache(requestURL, data)
 	return nil
+}
+
+func (c *Client) readCache(requestURL string) ([]byte, bool) {
+	if c.DisableCache || c.CacheDir == "" || c.CacheTTL <= 0 {
+		return nil, false
+	}
+	path := c.cachePath(requestURL)
+	info, err := os.Stat(path)
+	if err != nil || time.Since(info.ModTime()) > c.CacheTTL {
+		return nil, false
+	}
+	data, err := os.ReadFile(path)
+	return data, err == nil
+}
+
+func (c *Client) writeCache(requestURL string, data []byte) {
+	if c.DisableCache || c.CacheDir == "" || c.CacheTTL <= 0 {
+		return
+	}
+	if err := os.MkdirAll(c.CacheDir, 0o700); err != nil {
+		return
+	}
+	_ = os.WriteFile(c.cachePath(requestURL), data, 0o600)
+}
+
+func (c *Client) cachePath(requestURL string) string {
+	key := sha256.Sum256([]byte(requestURL))
+	return filepath.Join(c.CacheDir, fmt.Sprintf("%x.json", key))
 }
 
 type apiReference struct {

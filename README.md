@@ -49,16 +49,33 @@ Options:
 --json              Output machine-readable JSON
 --no-color          Disable terminal colors
 --offline           Only read local Git information
+--repo <path>       Analyze a repository without changing directory
 --remote <name>     Select a Git remote (default: origin)
+--github-host       GitHub or GitHub Enterprise hostname
 --context <number>  Show nearby source lines
+--history           Trace the complete history of the target line
+--function          Analyze the containing named Go function
+--include-diff      Include the commit diff in JSON (default: true)
+--max-diff-size     Maximum diff bytes to include
+--no-cache          Disable the GitHub API response cache
+--cache-ttl         Set the GitHub API cache lifetime
 --verbose           Show analysis progress on stderr
 ```
 
 Run `codewhy --help` for the complete command reference.
 
+```sh
+codewhy --history src/auth.ts:42
+codewhy --function internal/git/client.go:60
+codewhy --repo ../another-project src/main.go:10
+codewhy --include-diff=false src/auth.ts:42
+codewhy --max-diff-size 262144 src/auth.ts:42
+codewhy --github-host github.example.com src/auth.ts:42
+```
+
 ## JSON Output
 
-The JSON schema is versioned and uses empty arrays rather than `null` for collection fields:
+The JSON schema is versioned and uses empty arrays rather than `null` for collection fields. The published schema is available at [`docs/schema/codewhy-result.schema.json`](docs/schema/codewhy-result.schema.json).
 
 ```json
 {
@@ -76,6 +93,7 @@ The JSON schema is versioned and uses empty arrays rather than `null` for collec
     "date": "2024-08-12T10:30:00Z",
     "message": "Prevent duplicate token refresh requests",
     "diff": "...",
+    "diff_included": true,
     "diff_truncated": false,
     "files": ["src/auth.ts"],
     "url": "https://github.com/acme/app/commit/4f28c31..."
@@ -101,6 +119,7 @@ The JSON schema is versioned and uses empty arrays rather than `null` for collec
     }
   ],
   "issues": [],
+  "history": [],
   "reason": "Prevent concurrent token refresh. Concurrent requests could invalidate each other's tokens.",
   "confidence": "high",
   "warnings": []
@@ -117,6 +136,12 @@ Authentication is optional for public repositories, but avoids GitHub's low anon
 4. Anonymous GitHub API access
 
 Tokens are sent only in the GitHub authorization header and are never printed or logged.
+
+For GitHub Enterprise, pass `--github-host github.example.com`. The API base URL is derived as `https://github.example.com/api/v3`.
+
+## Cache
+
+Successful GitHub API responses are cached for 15 minutes under the operating system's user cache directory. Use `--no-cache` to disable caching or `--cache-ttl 1h` to change the lifetime. Cache files never contain authentication tokens.
 
 ## How It Works
 
@@ -143,7 +168,7 @@ Use `--offline` to disable all remote inspection and GitHub requests.
 
 ## Current Limitations
 
-- Tracks the blame-selected origin, not the complete history of a line.
+- Function analysis currently supports named Go functions and methods.
 - Supports GitHub remotes only; local Git results still work for other hosts.
 - PR association depends on GitHub's commit-to-PR API.
 - Reason summaries are deterministic excerpts, not semantic AI summaries.
@@ -151,8 +176,7 @@ Use `--offline` to disable all remote inspection and GitHub requests.
 
 ## Roadmap
 
-- Trace complete line history, not only the latest relevant change
-- Function and code-block tracking
+- Function literals and code-block tracking
 - GitLab support
 - PR review comment analysis
 - ADR and documentation search

@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/0stick/CodeWhy/blob/main/docs/schema/codewhy-result.schema.json",
+  "title": "codewhy JSON response",
+  "oneOf": [
+    {"$ref": "#/$defs/result"},
+    {"$ref": "#/$defs/errorResponse"}
+  ],
+  "$defs": {
+    "result": {
+      "type": "object",
+      "required": ["schema_version", "commit", "pull_requests", "issues", "history", "reason", "confidence", "warnings"],
+      "properties": {
+        "schema_version": {"const": "1"},
+        "target": {"$ref": "#/$defs/target"},
+        "commit": {"$ref": "#/$defs/commit"},
+        "pull_request": {"$ref": "#/$defs/reference"},
+        "pull_requests": {"type": "array", "items": {"$ref": "#/$defs/reference"}},
+        "issues": {"type": "array", "items": {"$ref": "#/$defs/reference"}},
+        "history": {"type": "array", "items": {"$ref": "#/$defs/historyEntry"}},
+        "reason": {"type": "string"},
+        "confidence": {"enum": ["high", "medium", "low"]},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "errorResponse": {
+      "type": "object",
+      "required": ["schema_version", "error"],
+      "properties": {
+        "schema_version": {"const": "1"},
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {
+            "code": {"type": "string"},
+            "message": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "required": ["file", "line"],
+      "properties": {
+        "file": {"type": "string"},
+        "line": {"type": "integer", "minimum": 1},
+        "function": {"$ref": "#/$defs/function"},
+        "source_file": {"type": "string"},
+        "source_line": {"type": "integer", "minimum": 1},
+        "code": {"type": "string"},
+        "context": {"type": "array", "items": {"$ref": "#/$defs/contextLine"}}
+      },
+      "additionalProperties": false
+    },
+    "function": {
+      "type": "object",
+      "required": ["name", "start_line", "end_line"],
+      "properties": {
+        "name": {"type": "string"},
+        "start_line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "contextLine": {
+      "type": "object",
+      "required": ["line", "code", "current"],
+      "properties": {
+        "line": {"type": "integer", "minimum": 1},
+        "code": {"type": "string"},
+        "current": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "commit": {
+      "type": "object",
+      "required": ["sha", "author", "date", "message", "diff_included", "diff_truncated", "files"],
+      "properties": {
+        "sha": {"type": "string"},
+        "author": {"type": "string"},
+        "date": {"type": "string"},
+        "message": {"type": "string"},
+        "diff": {"type": "string"},
+        "diff_included": {"type": "boolean"},
+        "diff_truncated": {"type": "boolean"},
+        "files": {"type": "array", "items": {"type": "string"}},
+        "url": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "reference": {
+      "type": "object",
+      "required": ["number", "title", "url"],
+      "properties": {
+        "number": {"type": "integer", "minimum": 1},
+        "title": {"type": "string"},
+        "body": {"type": "string"},
+        "url": {"type": "string"},
+        "state": {"type": "string"},
+        "kind": {"enum": ["issue", "pull_request"]},
+        "merged": {"type": "boolean"},
+        "base_branch": {"type": "string"},
+        "base_default": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "historyEntry": {
+      "type": "object",
+      "required": ["sha", "author", "date", "subject"],
+      "properties": {
+        "sha": {"type": "string"},
+        "author": {"type": "string"},
+        "date": {"type": "string"},
+        "subject": {"type": "string"},
+        "url": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

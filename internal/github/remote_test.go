@@ -8,9 +8,9 @@ import (
 
 func TestParseRemote(t *testing.T) {
 	tests := map[string]github.Repository{
-		"git@github.com:owner/repo.git":       {Owner: "owner", Name: "repo"},
-		"https://github.com/owner/repo.git":   {Owner: "owner", Name: "repo"},
-		"ssh://git@github.com/owner/repo.git": {Owner: "owner", Name: "repo"},
+		"git@github.com:owner/repo.git":       {Host: "github.com", Owner: "owner", Name: "repo"},
+		"https://github.com/owner/repo.git":   {Host: "github.com", Owner: "owner", Name: "repo"},
+		"ssh://git@github.com/owner/repo.git": {Host: "github.com", Owner: "owner", Name: "repo"},
 	}
 	for raw, want := range tests {
 		got, err := github.ParseRemote(raw)
@@ -20,6 +20,16 @@ func TestParseRemote(t *testing.T) {
 		if got != want {
 			t.Errorf("ParseRemote(%q) = %#v, want %#v", raw, got, want)
 		}
+	}
+}
+
+func TestParseGitHubEnterpriseRemote(t *testing.T) {
+	got, err := github.ParseRemoteForHost("git@git.example.com:owner/repo.git", "git.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Host != "git.example.com" || got.APIBaseURL() != "https://git.example.com/api/v3" {
+		t.Fatalf("unexpected repository: %#v", got)
 	}
 }
 

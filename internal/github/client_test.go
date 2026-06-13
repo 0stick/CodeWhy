@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/0stick/CodeWhy/internal/github"
 )
@@ -14,6 +16,39 @@ func TestResolveTokenPrefersCodewhyEnvironmentVariable(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "github-token")
 	if got := github.ResolveToken(context.Background()); got != "codewhy-token" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestClientUsesGitHubEnterpriseAPIBaseURL(t *testing.T) {
+	client := github.NewClientForRepository("", github.Repository{Host: "git.example.com", Owner: "acme", Name: "tool"})
+	if client.BaseURL != "https://git.example.com/api/v3" {
+		t.Fatalf("base URL = %q", client.BaseURL)
+	}
+}
+
+func TestClientCachesSuccessfulResponses(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number":5,"title":"Cached issue","html_url":"https://example.test/issues/5"}`))
+	}))
+	defer server.Close()
+
+	client := github.NewClient("")
+	client.BaseURL = server.URL
+	client.HTTPClient = server.Client()
+	client.CacheDir = t.TempDir()
+	client.CacheTTL = time.Hour
+	repo := github.Repository{Owner: "acme", Name: "tool"}
+	if _, err := client.Issue(context.Background(), repo, 5); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Issue(context.Background(), repo, 5); err != nil {
+		t.Fatal(err)
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("HTTP requests = %d, want 1", requests.Load())
 	}
 }
 

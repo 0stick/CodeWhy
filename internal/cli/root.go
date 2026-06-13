@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/0stick/CodeWhy/internal/analyze"
 	"github.com/0stick/CodeWhy/internal/render"
@@ -57,8 +58,16 @@ func NewRootCommand() *cobra.Command {
 	flags.Bool("json", false, "output machine-readable JSON")
 	flags.Bool("no-color", false, "disable terminal colors")
 	flags.Bool("offline", false, "only use local Git information")
+	flags.String("repo", ".", "Git repository directory")
 	flags.String("remote", "origin", "Git remote to inspect")
+	flags.String("github-host", "github.com", "GitHub or GitHub Enterprise hostname")
 	flags.Int("context", 0, "show this many lines around the target")
+	flags.Bool("include-diff", true, "include commit diff in JSON output")
+	flags.Int("max-diff-size", 1<<20, "maximum diff bytes to include")
+	flags.Bool("history", false, "trace the complete history of the target line")
+	flags.Bool("function", false, "analyze the named Go function containing the target line")
+	flags.Bool("no-cache", false, "disable the GitHub API response cache")
+	flags.Duration("cache-ttl", 15*time.Minute, "GitHub API cache lifetime")
 	flags.BoolP("verbose", "v", false, "show analysis progress")
 
 	explain := &cobra.Command{
@@ -93,7 +102,8 @@ func runExplain(cmd *cobra.Command, value string) error {
 	if err != nil {
 		return err
 	}
-	result, err := analyze.New(".").Explain(cmd.Context(), location, options)
+	repo, _ := cmd.Flags().GetString("repo")
+	result, err := analyze.New(repo).Explain(cmd.Context(), location, options)
 	if err != nil {
 		return err
 	}
@@ -105,7 +115,8 @@ func runCommit(cmd *cobra.Command, sha string) error {
 	if err != nil {
 		return err
 	}
-	result, err := analyze.New(".").ExplainCommit(cmd.Context(), sha, options)
+	repo, _ := cmd.Flags().GetString("repo")
+	result, err := analyze.New(repo).ExplainCommit(cmd.Context(), sha, options)
 	if err != nil {
 		return err
 	}
@@ -117,13 +128,29 @@ func commandOptions(cmd *cobra.Command) (analyze.Options, render.Options, error)
 	noColor, _ := cmd.Flags().GetBool("no-color")
 	offline, _ := cmd.Flags().GetBool("offline")
 	remote, _ := cmd.Flags().GetString("remote")
+	githubHost, _ := cmd.Flags().GetString("github-host")
 	contextLines, _ := cmd.Flags().GetInt("context")
+	includeDiff, _ := cmd.Flags().GetBool("include-diff")
+	maxDiffSize, _ := cmd.Flags().GetInt("max-diff-size")
+	history, _ := cmd.Flags().GetBool("history")
+	function, _ := cmd.Flags().GetBool("function")
+	noCache, _ := cmd.Flags().GetBool("no-cache")
+	cacheTTL, _ := cmd.Flags().GetDuration("cache-ttl")
 	verbose, _ := cmd.Flags().GetBool("verbose")
 	if contextLines < 0 {
 		return analyze.Options{}, render.Options{}, fmt.Errorf("--context must be zero or greater")
 	}
 	if remote == "" {
 		return analyze.Options{}, render.Options{}, fmt.Errorf("--remote cannot be empty")
+	}
+	if strings.TrimSpace(githubHost) == "" {
+		return analyze.Options{}, render.Options{}, fmt.Errorf("--github-host cannot be empty")
+	}
+	if maxDiffSize < 1 {
+		return analyze.Options{}, render.Options{}, fmt.Errorf("--max-diff-size must be a positive integer")
+	}
+	if cacheTTL < 0 {
+		return analyze.Options{}, render.Options{}, fmt.Errorf("--cache-ttl cannot be negative")
 	}
 
 	var logger func(string)
@@ -134,10 +161,17 @@ func commandOptions(cmd *cobra.Command) (analyze.Options, render.Options, error)
 	}
 	color := !jsonOutput && !noColor && os.Getenv("NO_COLOR") == "" && isTerminal(cmd.OutOrStdout())
 	return analyze.Options{
-			Remote:  remote,
-			Offline: offline,
-			Context: contextLines,
-			Verbose: logger,
+			Remote:       remote,
+			Offline:      offline,
+			Context:      contextLines,
+			IncludeDiff:  includeDiff,
+			MaxDiffBytes: maxDiffSize,
+			History:      history,
+			Function:     function,
+			GitHubHost:   githubHost,
+			NoCache:      noCache,
+			CacheTTL:     cacheTTL,
+			Verbose:      logger,
 		}, render.Options{
 			JSON:  jsonOutput,
 			Color: color,
@@ -185,7 +219,7 @@ func errorCode(err error) string {
 		return "invalid_target"
 	case strings.Contains(message, "accepts ") && strings.Contains(message, "arg"):
 		return "invalid_arguments"
-	case strings.Contains(message, "unknown flag"), strings.Contains(message, "--context must"), strings.Contains(message, "--remote cannot"):
+	case strings.Contains(message, "unknown flag"), strings.Contains(message, "--context must"), strings.Contains(message, "--remote cannot"), strings.Contains(message, "--github-host cannot"), strings.Contains(message, "--max-diff-size must"), strings.Contains(message, "--cache-ttl cannot"):
 		return "invalid_option"
 	case strings.Contains(message, "not inside a git repository"):
 		return "not_git_repository"

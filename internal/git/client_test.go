@@ -96,6 +96,56 @@ func TestCommitLimitsLargeDiff(t *testing.T) {
 	}
 }
 
+func TestCommitCanSkipDiff(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.name", "Test Author")
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(repo, "small.txt"), []byte("content\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "small.txt")
+	runGit(t, repo, "commit", "-m", "Add small file")
+
+	client := gitclient.Client{Dir: repo}
+	commit, err := client.CommitWithOptions(context.Background(), "HEAD", gitclient.CommitOptions{IncludeDiff: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commit.Diff != "" || commit.DiffIncluded || commit.DiffTruncated {
+		t.Fatalf("unexpected diff state: %#v", commit)
+	}
+}
+
+func TestLineHistoryTracksEarlierVersionsOfLine(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.name", "Test Author")
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	path := filepath.Join(repo, "history.txt")
+	if err := os.WriteFile(path, []byte("version one\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "history.txt")
+	runGit(t, repo, "commit", "-m", "Add first version")
+	if err := os.WriteFile(path, []byte("version two\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "commit", "-am", "Update to second version")
+
+	client := gitclient.Client{Dir: repo}
+	history, err := client.LineHistory(context.Background(), "history.txt", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("history = %#v", history)
+	}
+	if history[0].Subject != "Update to second version" || history[1].Subject != "Add first version" {
+		t.Fatalf("unexpected history order: %#v", history)
+	}
+}
+
 func TestReadContext(t *testing.T) {
 	repo := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repo, "sample.txt"), []byte("one\ntwo\nthree\n"), 0o600); err != nil {

@@ -23,6 +23,7 @@ func TestJSONOutputHasStableShape(t *testing.T) {
 		},
 		PullRequests: []model.Reference{},
 		Issues:       []model.Reference{},
+		History:      []model.HistoryEntry{},
 		Reason:       "Prevent duplicate refreshes",
 		Confidence:   "medium",
 		Warnings:     []string{},
@@ -36,12 +37,12 @@ func TestJSONOutputHasStableShape(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"schema_version", "commit", "pull_requests", "issues", "reason", "confidence", "warnings"} {
+	for _, key := range []string{"schema_version", "commit", "pull_requests", "issues", "history", "reason", "confidence", "warnings"} {
 		if _, ok := decoded[key]; !ok {
 			t.Errorf("missing JSON key %q in %s", key, output.String())
 		}
 	}
-	if strings.Contains(output.String(), `"pull_requests": null`) || strings.Contains(output.String(), `"issues": null`) || strings.Contains(output.String(), `"warnings": null`) {
+	if strings.Contains(output.String(), `"pull_requests": null`) || strings.Contains(output.String(), `"issues": null`) || strings.Contains(output.String(), `"history": null`) || strings.Contains(output.String(), `"warnings": null`) {
 		t.Fatalf("arrays must not be null: %s", output.String())
 	}
 }

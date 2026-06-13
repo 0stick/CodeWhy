@@ -13,24 +13,40 @@ type ErrorDetail struct {
 }
 
 type Result struct {
-	SchemaVersion string      `json:"schema_version"`
-	Target        *Target     `json:"target,omitempty"`
-	Commit        Commit      `json:"commit"`
-	PullRequest   *Reference  `json:"pull_request,omitempty"`
-	PullRequests  []Reference `json:"pull_requests"`
-	Issues        []Reference `json:"issues"`
-	Reason        string      `json:"reason"`
-	Confidence    string      `json:"confidence"`
-	Warnings      []string    `json:"warnings"`
+	SchemaVersion string         `json:"schema_version"`
+	Target        *Target        `json:"target,omitempty"`
+	Commit        Commit         `json:"commit"`
+	PullRequest   *Reference     `json:"pull_request,omitempty"`
+	PullRequests  []Reference    `json:"pull_requests"`
+	Issues        []Reference    `json:"issues"`
+	History       []HistoryEntry `json:"history"`
+	Reason        string         `json:"reason"`
+	Confidence    string         `json:"confidence"`
+	Warnings      []string       `json:"warnings"`
+}
+
+type HistoryEntry struct {
+	SHA     string `json:"sha"`
+	Author  string `json:"author"`
+	Date    string `json:"date"`
+	Subject string `json:"subject"`
+	URL     string `json:"url,omitempty"`
 }
 
 type Target struct {
 	File       string        `json:"file"`
 	Line       int           `json:"line"`
+	Function   *Function     `json:"function,omitempty"`
 	SourceFile string        `json:"source_file,omitempty"`
 	SourceLine int           `json:"source_line,omitempty"`
 	Code       string        `json:"code,omitempty"`
 	Context    []ContextLine `json:"context,omitempty"`
+}
+
+type Function struct {
+	Name      string `json:"name"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
 }
 
 type ContextLine struct {
@@ -45,6 +61,7 @@ type Commit struct {
 	Date          string   `json:"date"`
 	Message       string   `json:"message"`
 	Diff          string   `json:"diff,omitempty"`
+	DiffIncluded  bool     `json:"diff_included"`
 	DiffTruncated bool     `json:"diff_truncated"`
 	Files         []string `json:"files"`
 	URL           string   `json:"url,omitempty"`

@@ -61,8 +61,16 @@ codewhy 'C:\work\app\src\auth.ts:42'
 --json              输出机器可读的 JSON
 --no-color          禁用终端颜色
 --offline           仅使用本地 Git 信息
+--repo <path>       无需切换目录即可分析指定仓库
 --remote <name>     指定 Git remote，默认为 origin
+--github-host       指定 GitHub 或 GitHub Enterprise 主机名
 --context <number>  显示目标行附近的代码
+--history           追踪目标行的完整历史
+--function          分析目标行所属的 Go 命名函数
+--include-diff      在 JSON 中包含提交 diff，默认开启
+--max-diff-size     设置 diff 最大字节数
+--no-cache          禁用 GitHub API 响应缓存
+--cache-ttl         设置 GitHub API 缓存有效期
 --verbose           在 stderr 中显示分析过程
 ```
 
@@ -70,6 +78,15 @@ codewhy 'C:\work\app\src\auth.ts:42'
 
 ```sh
 codewhy --help
+```
+
+```sh
+codewhy --history src/auth.ts:42
+codewhy --function internal/git/client.go:60
+codewhy --repo ../another-project src/main.go:10
+codewhy --include-diff=false src/auth.ts:42
+codewhy --max-diff-size 262144 src/auth.ts:42
+codewhy --github-host github.example.com src/auth.ts:42
 ```
 
 ### 使用示例
@@ -100,7 +117,7 @@ codewhy commit 4f28c31
 
 ## JSON 输出
 
-JSON 数据结构带有版本号。集合字段在没有内容时输出空数组 `[]`，而不是 `null`，便于脚本和 AI Agent 稳定调用：
+JSON 数据结构带有版本号。集合字段在没有内容时输出空数组 `[]`，而不是 `null`，便于脚本和 AI Agent 稳定调用。正式 Schema 位于 [`docs/schema/codewhy-result.schema.json`](docs/schema/codewhy-result.schema.json)。
 
 ```json
 {
@@ -118,6 +135,7 @@ JSON 数据结构带有版本号。集合字段在没有内容时输出空数组
     "date": "2024-08-12T10:30:00Z",
     "message": "Prevent duplicate token refresh requests",
     "diff": "...",
+    "diff_included": true,
     "diff_truncated": false,
     "files": ["src/auth.ts"],
     "url": "https://github.com/acme/app/commit/4f28c31..."
@@ -143,6 +161,7 @@ JSON 数据结构带有版本号。集合字段在没有内容时输出空数组
     }
   ],
   "issues": [],
+  "history": [],
   "reason": "Prevent concurrent token refresh. Concurrent requests could invalidate each other's tokens.",
   "confidence": "high",
   "warnings": []
@@ -173,6 +192,12 @@ codewhy src/auth.ts:42
 ```
 
 Token 只会被放入 GitHub 请求的认证头中，绝不会被输出或写入日志。
+
+GitHub Enterprise 用户可以传入 `--github-host github.example.com`，API 地址会自动使用 `https://github.example.com/api/v3`。
+
+## 缓存
+
+成功的 GitHub API 响应默认缓存在操作系统的用户缓存目录中，有效期为 15 分钟。使用 `--no-cache` 可以关闭缓存，使用 `--cache-ttl 1h` 可以调整有效期。缓存文件不会包含认证 Token。
 
 ## 工作原理
 
@@ -206,7 +231,7 @@ Token 只会被放入 GitHub 请求的认证头中，绝不会被输出或写入
 
 ## 当前限制
 
-- 当前追踪 Git blame 选出的来源提交，而不是某一行的完整历史。
+- 函数分析目前支持 Go 命名函数和方法。
 - 远程信息目前仅支持 GitHub；其他托管平台仍可使用本地 Git 分析。
 - PR 关联依赖 GitHub 的 commit-to-PR API。
 - Reason 是确定性的文本摘要，不是 AI 语义总结。
@@ -214,8 +239,7 @@ Token 只会被放入 GitHub 请求的认证头中，绝不会被输出或写入
 
 ## Roadmap
 
-- 追踪完整行历史，而不仅是最近一次相关修改
-- 函数和代码块级追踪
+- 函数字面量和代码块级追踪
 - GitLab 支持
 - PR review comment 分析
 - ADR 和文档搜索

@@ -29,6 +29,21 @@ type Blame struct {
 	Code       string
 }
 
+type CommitOptions struct {
+	IncludeDiff  bool
+	MaxDiffBytes int
+}
+
+func (c Client) LineHistory(ctx context.Context, file string, line int) ([]model.HistoryEntry, error) {
+	lineArg := strconv.Itoa(line) + "," + strconv.Itoa(line) + ":" + file
+	format := "%x1e%H%x00%an%x00%aI%x00%s"
+	out, err := c.run(ctx, "log", "--no-patch", "--format="+format, "-L", lineArg)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read history for %s:%d: %w", file, line, err)
+	}
+	return parseLineHistory(out)
+}
+
 func (c Client) Root(ctx context.Context) (string, error) {
 	if _, err := exec.LookPath("git"); err != nil {
 		return "", fmt.Errorf("git is required but was not found in PATH; install Git and try again")
@@ -50,6 +65,13 @@ func (c Client) BlameLine(ctx context.Context, file string, line int) (Blame, er
 }
 
 func (c Client) Commit(ctx context.Context, sha string) (model.Commit, error) {
+	return c.CommitWithOptions(ctx, sha, CommitOptions{
+		IncludeDiff:  true,
+		MaxDiffBytes: MaxDiffBytes,
+	})
+}
+
+func (c Client) CommitWithOptions(ctx context.Context, sha string, options CommitOptions) (model.Commit, error) {
 	format := "%H%x00%an%x00%aI%x00%B"
 	out, err := c.run(ctx, "show", "-s", "--format="+format, sha)
 	if err != nil {
@@ -60,9 +82,17 @@ func (c Client) Commit(ctx context.Context, sha string) (model.Commit, error) {
 		return model.Commit{}, fmt.Errorf("cannot parse metadata for commit %q", sha)
 	}
 
-	diff, diffTruncated, err := c.runLimited(ctx, MaxDiffBytes, "show", "--format=", "--no-ext-diff", "--unified=3", sha)
-	if err != nil {
-		return model.Commit{}, fmt.Errorf("cannot read diff for commit %q: %w", sha, err)
+	var diff []byte
+	var diffTruncated bool
+	if options.IncludeDiff {
+		limit := options.MaxDiffBytes
+		if limit <= 0 {
+			limit = MaxDiffBytes
+		}
+		diff, diffTruncated, err = c.runLimited(ctx, limit, "show", "--format=", "--no-ext-diff", "--unified=3", sha)
+		if err != nil {
+			return model.Commit{}, fmt.Errorf("cannot read diff for commit %q: %w", sha, err)
+		}
 	}
 	filesOut, err := c.run(ctx, "diff-tree", "--root", "--no-commit-id", "--name-only", "-r", "-z", sha)
 	if err != nil {
@@ -75,6 +105,7 @@ func (c Client) Commit(ctx context.Context, sha string) (model.Commit, error) {
 		Date:          string(parts[2]),
 		Message:       strings.TrimSpace(string(parts[3])),
 		Diff:          strings.TrimSpace(string(diff)),
+		DiffIncluded:  options.IncludeDiff,
 		DiffTruncated: diffTruncated,
 		Files:         splitNUL(filesOut),
 	}, nil
@@ -230,4 +261,30 @@ func splitNUL(data []byte) []string {
 		}
 	}
 	return result
+}
+
+func parseLineHistory(data []byte) ([]model.HistoryEntry, error) {
+	records := bytes.Split(data, []byte{0x1e})
+	history := make([]model.HistoryEntry, 0, len(records))
+	for _, record := range records {
+		record = bytes.TrimSpace(record)
+		if len(record) == 0 {
+			continue
+		}
+		line := record
+		if newline := bytes.IndexByte(record, '\n'); newline >= 0 {
+			line = record[:newline]
+		}
+		fields := bytes.SplitN(line, []byte{0}, 4)
+		if len(fields) != 4 {
+			return nil, fmt.Errorf("unexpected git line history record")
+		}
+		history = append(history, model.HistoryEntry{
+			SHA:     string(fields[0]),
+			Author:  string(fields[1]),
+			Date:    string(fields[2]),
+			Subject: string(fields[3]),
+		})
+	}
+	return history, nil
 }

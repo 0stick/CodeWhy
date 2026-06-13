@@ -7,11 +7,13 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	gitclient "github.com/0stick/CodeWhy/internal/git"
 	"github.com/0stick/CodeWhy/internal/github"
 	"github.com/0stick/CodeWhy/internal/model"
+	"github.com/0stick/CodeWhy/internal/source"
 	"github.com/0stick/CodeWhy/internal/target"
 )
 
@@ -23,22 +25,29 @@ type Forge interface {
 }
 
 type Options struct {
-	Remote  string
-	Offline bool
-	Context int
-	Verbose func(string)
+	Remote       string
+	Offline      bool
+	Context      int
+	IncludeDiff  bool
+	MaxDiffBytes int
+	History      bool
+	Function     bool
+	GitHubHost   string
+	NoCache      bool
+	CacheTTL     time.Duration
+	Verbose      func(string)
 }
 
 type Analyzer struct {
 	Git      gitclient.Client
-	NewForge func(context.Context) Forge
+	NewForge func(context.Context, github.Repository) Forge
 }
 
 func New(dir string) *Analyzer {
 	return &Analyzer{
 		Git: gitclient.Client{Dir: dir},
-		NewForge: func(ctx context.Context) Forge {
-			return github.NewClient(github.ResolveToken(ctx))
+		NewForge: func(ctx context.Context, repo github.Repository) Forge {
+			return github.NewClientForRepository(github.ResolveTokenForHost(ctx, repo.Host), repo)
 		},
 	}
 }
@@ -54,12 +63,26 @@ func (a *Analyzer) Explain(ctx context.Context, location target.Location, option
 		return model.Result{}, err
 	}
 
-	logf(options, "tracing %s:%d with git blame -w -M -C", file, location.Line)
-	blame, err := a.Git.BlameLine(ctx, file, location.Line)
+	analysisLine := location.Line
+	var function *model.Function
+	if options.Function {
+		function, err = source.FindFunction(root, file, location.Line)
+		if err != nil {
+			return model.Result{}, err
+		}
+		analysisLine = function.StartLine
+		logf(options, "target belongs to function %s at lines %d-%d", function.Name, function.StartLine, function.EndLine)
+	}
+
+	logf(options, "tracing %s:%d with git blame -w -M -C", file, analysisLine)
+	blame, err := a.Git.BlameLine(ctx, file, analysisLine)
 	if err != nil {
 		return model.Result{}, err
 	}
-	commit, err := a.Git.Commit(ctx, blame.SHA)
+	commit, err := a.Git.CommitWithOptions(ctx, blame.SHA, gitclient.CommitOptions{
+		IncludeDiff:  options.IncludeDiff,
+		MaxDiffBytes: options.MaxDiffBytes,
+	})
 	if err != nil {
 		return model.Result{}, err
 	}
@@ -75,10 +98,18 @@ func (a *Analyzer) Explain(ctx context.Context, location target.Location, option
 	result.Target = &model.Target{
 		File:       filepath.ToSlash(file),
 		Line:       location.Line,
+		Function:   function,
 		SourceFile: filepath.ToSlash(blame.SourceFile),
 		SourceLine: blame.SourceLine,
 		Code:       blame.Code,
 		Context:    contextLines,
+	}
+	if options.History {
+		logf(options, "tracing complete line history")
+		result.History, err = a.Git.LineHistory(ctx, file, analysisLine)
+		if err != nil {
+			return model.Result{}, err
+		}
 	}
 	a.enrich(ctx, &result, options)
 	return result, nil
@@ -89,7 +120,10 @@ func (a *Analyzer) ExplainCommit(ctx context.Context, sha string, options Option
 		return model.Result{}, err
 	}
 	logf(options, "reading commit %s", sha)
-	commit, err := a.Git.Commit(ctx, sha)
+	commit, err := a.Git.CommitWithOptions(ctx, sha, gitclient.CommitOptions{
+		IncludeDiff:  options.IncludeDiff,
+		MaxDiffBytes: options.MaxDiffBytes,
+	})
 	if err != nil {
 		return model.Result{}, err
 	}
@@ -111,15 +145,22 @@ func (a *Analyzer) enrich(ctx context.Context, result *model.Result, options Opt
 		setReason(result)
 		return
 	}
-	repo, err := github.ParseRemote(remoteURL)
+	repo, err := github.ParseRemoteForHost(remoteURL, options.GitHubHost)
 	if err != nil {
 		result.Warnings = append(result.Warnings, err.Error())
 		setReason(result)
 		return
 	}
-	result.Commit.URL = fmt.Sprintf("https://github.com/%s/%s/commit/%s", repo.Owner, repo.Name, result.Commit.SHA)
+	result.Commit.URL = fmt.Sprintf("%s/%s/%s/commit/%s", repo.WebBaseURL(), repo.Owner, repo.Name, result.Commit.SHA)
+	for index := range result.History {
+		result.History[index].URL = fmt.Sprintf("%s/%s/%s/commit/%s", repo.WebBaseURL(), repo.Owner, repo.Name, result.History[index].SHA)
+	}
 
-	forge := a.NewForge(ctx)
+	forge := a.NewForge(ctx, repo)
+	if client, ok := forge.(*github.Client); ok {
+		client.DisableCache = options.NoCache
+		client.CacheTTL = options.CacheTTL
+	}
 	logf(options, "querying GitHub for associated pull request")
 	pullRequests, err := forge.PullRequestsForCommit(ctx, repo, result.Commit.SHA)
 	if err != nil {
@@ -194,6 +235,7 @@ func baseResult(commit model.Commit) model.Result {
 		Commit:        commit,
 		PullRequests:  []model.Reference{},
 		Issues:        []model.Reference{},
+		History:       []model.HistoryEntry{},
 		Warnings:      []string{},
 	}
 }

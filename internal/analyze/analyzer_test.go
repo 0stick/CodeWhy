@@ -50,7 +50,7 @@ func TestNetworkFailureDegradesToLocalResult(t *testing.T) {
 	runGit(t, repo, "remote", "add", "origin", "https://github.com/acme/tool.git")
 
 	analyzer := analyze.New(repo)
-	analyzer.NewForge = func(context.Context) analyze.Forge {
+	analyzer.NewForge = func(context.Context, github.Repository) analyze.Forge {
 		return failingForge{}
 	}
 	result, err := analyzer.Explain(context.Background(), target.Location{File: "main.go", Line: 3}, analyze.Options{Remote: "origin"})
@@ -70,7 +70,7 @@ func TestPullRequestReferenceIsNotAddedAsIssue(t *testing.T) {
 	runGit(t, repo, "remote", "add", "origin", "https://github.com/acme/tool.git")
 
 	analyzer := analyze.New(repo)
-	analyzer.NewForge = func(context.Context) analyze.Forge {
+	analyzer.NewForge = func(context.Context, github.Repository) analyze.Forge {
 		return pullRequestIssueForge{}
 	}
 	result, err := analyzer.Explain(context.Background(), target.Location{File: "main.go", Line: 3}, analyze.Options{Remote: "origin"})
@@ -90,7 +90,7 @@ func TestAnalyzerSelectsBestPullRequestAndKeepsCandidates(t *testing.T) {
 	runGit(t, repo, "remote", "add", "origin", "https://github.com/acme/tool.git")
 
 	analyzer := analyze.New(repo)
-	analyzer.NewForge = func(context.Context) analyze.Forge {
+	analyzer.NewForge = func(context.Context, github.Repository) analyze.Forge {
 		return multiplePullRequestForge{}
 	}
 	result, err := analyzer.Explain(context.Background(), target.Location{File: "main.go", Line: 3}, analyze.Options{Remote: "origin"})
@@ -102,6 +102,35 @@ func TestAnalyzerSelectsBestPullRequestAndKeepsCandidates(t *testing.T) {
 	}
 	if result.PullRequest == nil || result.PullRequest.Number != 20 {
 		t.Fatalf("selected pull request = %#v", result.PullRequest)
+	}
+}
+
+func TestAnalyzerReportsContainingGoFunction(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.name", "Test Author")
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	code := "package main\n\nfunc run() {\n\tprintln(\"running\")\n}\n"
+	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte(code), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "main.go")
+	runGit(t, repo, "commit", "-m", "Add run function")
+
+	analyzer := analyze.New(repo)
+	result, err := analyzer.Explain(context.Background(), target.Location{File: "main.go", Line: 4}, analyze.Options{
+		Offline:     true,
+		Function:    true,
+		IncludeDiff: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Target == nil || result.Target.Function == nil || result.Target.Function.Name != "run" {
+		t.Fatalf("unexpected target: %#v", result.Target)
+	}
+	if result.Target.SourceLine != 3 {
+		t.Fatalf("source line = %d, want function start line 3", result.Target.SourceLine)
 	}
 }
 
