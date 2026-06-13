@@ -25,6 +25,19 @@ func Result(w io.Writer, result model.Result, options Options) error {
 	return terminal(w, result, options.Color)
 }
 
+func Error(w io.Writer, code, message string) error {
+	encoder := json.NewEncoder(w)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(model.ErrorResponse{
+		SchemaVersion: model.SchemaVersion,
+		Error: model.ErrorDetail{
+			Code:    code,
+			Message: message,
+		},
+	})
+}
+
 func terminal(w io.Writer, result model.Result, color bool) error {
 	label := func(value string) string {
 		if !color {
