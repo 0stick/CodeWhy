@@ -70,6 +70,32 @@ func TestBlameLinePreservesUnicodeSourceFileAfterRename(t *testing.T) {
 	}
 }
 
+func TestCommitLimitsLargeDiff(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.name", "Test Author")
+	runGit(t, repo, "config", "user.email", "test@example.com")
+
+	content := strings.Repeat("large diff line with enough content\n", gitclient.MaxDiffBytes/16)
+	if err := os.WriteFile(filepath.Join(repo, "large.txt"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "large.txt")
+	runGit(t, repo, "commit", "-m", "Add large generated file")
+
+	client := gitclient.Client{Dir: repo}
+	commit, err := client.Commit(context.Background(), "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !commit.DiffTruncated {
+		t.Fatal("expected large diff to be marked as truncated")
+	}
+	if len(commit.Diff) > gitclient.MaxDiffBytes {
+		t.Fatalf("diff has %d bytes, limit is %d", len(commit.Diff), gitclient.MaxDiffBytes)
+	}
+}
+
 func TestReadContext(t *testing.T) {
 	repo := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repo, "sample.txt"), []byte("one\ntwo\nthree\n"), 0o600); err != nil {
