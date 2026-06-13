@@ -49,18 +49,18 @@ func ResolveToken(ctx context.Context) string {
 	return strings.TrimSpace(string(out))
 }
 
-func (c *Client) PullRequestForCommit(ctx context.Context, repo Repository, sha string) (*model.Reference, error) {
+func (c *Client) PullRequestsForCommit(ctx context.Context, repo Repository, sha string) ([]model.Reference, error) {
 	path := "/repos/" + url.PathEscape(repo.Owner) + "/" + url.PathEscape(repo.Name) +
 		"/commits/" + url.PathEscape(sha) + "/pulls"
 	var payload []apiReference
 	if err := c.get(ctx, path, &payload, "application/vnd.github+json"); err != nil {
 		return nil, err
 	}
-	if len(payload) == 0 {
-		return nil, nil
+	result := make([]model.Reference, 0, len(payload))
+	for _, candidate := range payload {
+		result = append(result, candidate.model("pull_request"))
 	}
-	ref := payload[0].model()
-	return &ref, nil
+	return result, nil
 }
 
 func (c *Client) Issue(ctx context.Context, repo Repository, number int) (model.Reference, error) {
@@ -70,7 +70,7 @@ func (c *Client) Issue(ctx context.Context, repo Repository, number int) (model.
 	if err := c.get(ctx, path, &payload, "application/vnd.github+json"); err != nil {
 		return model.Reference{}, err
 	}
-	return payload.model(), nil
+	return payload.model(payload.kind()), nil
 }
 
 func (c *Client) get(ctx context.Context, path string, target any, accept string) error {
@@ -105,19 +105,61 @@ func (c *Client) get(ctx context.Context, path string, target any, accept string
 }
 
 type apiReference struct {
-	Number  int    `json:"number"`
-	Title   string `json:"title"`
-	Body    string `json:"body"`
-	HTMLURL string `json:"html_url"`
-	State   string `json:"state"`
+	Number      int       `json:"number"`
+	Title       string    `json:"title"`
+	Body        string    `json:"body"`
+	HTMLURL     string    `json:"html_url"`
+	State       string    `json:"state"`
+	MergedAt    *string   `json:"merged_at"`
+	PullRequest *struct{} `json:"pull_request"`
+	Base        struct {
+		Ref  string `json:"ref"`
+		Repo struct {
+			DefaultBranch string `json:"default_branch"`
+		} `json:"repo"`
+	} `json:"base"`
 }
 
-func (r apiReference) model() model.Reference {
+func (r apiReference) model(kind string) model.Reference {
 	return model.Reference{
-		Number: r.Number,
-		Title:  r.Title,
-		Body:   r.Body,
-		URL:    r.HTMLURL,
-		State:  r.State,
+		Number:      r.Number,
+		Title:       r.Title,
+		Body:        r.Body,
+		URL:         r.HTMLURL,
+		State:       r.State,
+		Kind:        kind,
+		Merged:      r.MergedAt != nil,
+		BaseBranch:  r.Base.Ref,
+		BaseDefault: r.Base.Ref != "" && r.Base.Ref == r.Base.Repo.DefaultBranch,
 	}
+}
+
+func (r apiReference) kind() string {
+	if r.PullRequest != nil {
+		return "pull_request"
+	}
+	return "issue"
+}
+
+func SelectPullRequest(candidates []model.Reference) *model.Reference {
+	if len(candidates) == 0 {
+		return nil
+	}
+	best := 0
+	bestScore := -1
+	for index, candidate := range candidates {
+		score := 0
+		if candidate.BaseDefault {
+			score += 1
+		}
+		if candidate.Merged {
+			score += 2
+		}
+		if score > bestScore {
+			best = index
+			bestScore = score
+		}
+	}
+	selected := candidates[best]
+	return &selected
 }
