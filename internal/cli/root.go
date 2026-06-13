@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/0stick/CodeWhy/internal/analyze"
 	"github.com/0stick/CodeWhy/internal/render"
@@ -14,7 +17,27 @@ import (
 var version = "0.1.0-dev"
 
 func Execute() error {
-	return NewRootCommand().Execute()
+	return ExecuteArgs(os.Args[1:], os.Stdout, os.Stderr)
+}
+
+func ExecuteArgs(args []string, stdout, stderr io.Writer) error {
+	cmd := NewRootCommand()
+	cmd.SetArgs(args)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	err := cmd.Execute()
+	if err == nil || !requestsJSON(args) {
+		return err
+	}
+	if renderErr := render.Error(stdout, errorCode(err), err.Error()); renderErr != nil {
+		return renderErr
+	}
+	return renderedError{err: err}
+}
+
+func ErrorWasRendered(err error) bool {
+	var rendered renderedError
+	return errors.As(err, &rendered)
 }
 
 func NewRootCommand() *cobra.Command {
@@ -128,4 +151,51 @@ func isTerminal(w io.Writer) bool {
 	}
 	info, err := file.Stat()
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+type renderedError struct {
+	err error
+}
+
+func (e renderedError) Error() string {
+	return e.err.Error()
+}
+
+func (e renderedError) Unwrap() error {
+	return e.err
+}
+
+func requestsJSON(args []string) bool {
+	for _, arg := range args {
+		if arg == "--json" {
+			return true
+		}
+		if value, found := strings.CutPrefix(arg, "--json="); found {
+			enabled, err := strconv.ParseBool(value)
+			return err == nil && enabled
+		}
+	}
+	return false
+}
+
+func errorCode(err error) string {
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "expected <file>:<line>"), strings.Contains(message, "line must be a positive integer"), strings.Contains(message, "file path is empty"):
+		return "invalid_target"
+	case strings.Contains(message, "accepts ") && strings.Contains(message, "arg"):
+		return "invalid_arguments"
+	case strings.Contains(message, "unknown flag"), strings.Contains(message, "--context must"), strings.Contains(message, "--remote cannot"):
+		return "invalid_option"
+	case strings.Contains(message, "not inside a git repository"):
+		return "not_git_repository"
+	case strings.Contains(message, "git is required"):
+		return "git_not_found"
+	case strings.Contains(message, "cannot blame"):
+		return "blame_failed"
+	case strings.Contains(message, "cannot read commit"):
+		return "commit_failed"
+	default:
+		return "command_failed"
+	}
 }
