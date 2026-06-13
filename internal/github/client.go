@@ -89,7 +89,9 @@ func (c *Client) get(ctx context.Context, path string, target any, accept string
 	if err != nil {
 		return fmt.Errorf("GitHub request failed: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		_ = response.Body.Close()
+	}()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
 		message := strings.TrimSpace(string(body))
