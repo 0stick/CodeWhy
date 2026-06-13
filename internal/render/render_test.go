@@ -14,16 +14,18 @@ func TestJSONOutputHasStableShape(t *testing.T) {
 	result := model.Result{
 		SchemaVersion: model.SchemaVersion,
 		Commit: model.Commit{
-			SHA:     "abc",
-			Author:  "Alice",
-			Date:    "2024-08-12T10:00:00Z",
-			Message: "Prevent duplicate refreshes",
-			Files:   []string{},
+			SHA:           "abc",
+			Author:        "Alice",
+			Date:          "2024-08-12T10:00:00Z",
+			Message:       "Prevent duplicate refreshes",
+			DiffTruncated: false,
+			Files:         []string{},
 		},
-		Issues:     []model.Reference{},
-		Reason:     "Prevent duplicate refreshes",
-		Confidence: "medium",
-		Warnings:   []string{},
+		PullRequests: []model.Reference{},
+		Issues:       []model.Reference{},
+		Reason:       "Prevent duplicate refreshes",
+		Confidence:   "medium",
+		Warnings:     []string{},
 	}
 	var output bytes.Buffer
 	if err := render.Result(&output, result, render.Options{JSON: true}); err != nil {
@@ -34,12 +36,26 @@ func TestJSONOutputHasStableShape(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"schema_version", "commit", "issues", "reason", "confidence", "warnings"} {
+	for _, key := range []string{"schema_version", "commit", "pull_requests", "issues", "reason", "confidence", "warnings"} {
 		if _, ok := decoded[key]; !ok {
 			t.Errorf("missing JSON key %q in %s", key, output.String())
 		}
 	}
-	if strings.Contains(output.String(), `"issues": null`) || strings.Contains(output.String(), `"warnings": null`) {
+	if strings.Contains(output.String(), `"pull_requests": null`) || strings.Contains(output.String(), `"issues": null`) || strings.Contains(output.String(), `"warnings": null`) {
 		t.Fatalf("arrays must not be null: %s", output.String())
+	}
+}
+
+func TestJSONErrorOutputHasStableShape(t *testing.T) {
+	var output bytes.Buffer
+	if err := render.Error(&output, "not_git_repository", "run inside a Git repository"); err != nil {
+		t.Fatal(err)
+	}
+	var response model.ErrorResponse
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.SchemaVersion != model.SchemaVersion || response.Error.Code != "not_git_repository" {
+		t.Fatalf("unexpected response: %#v", response)
 	}
 }
