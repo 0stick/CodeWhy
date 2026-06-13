@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/0stick/CodeWhy/internal/model"
 )
+
+const MaxDiffBytes = 1 << 20
 
 type Client struct {
 	Dir string
@@ -57,7 +60,7 @@ func (c Client) Commit(ctx context.Context, sha string) (model.Commit, error) {
 		return model.Commit{}, fmt.Errorf("cannot parse metadata for commit %q", sha)
 	}
 
-	diff, err := c.run(ctx, "show", "--format=", "--no-ext-diff", "--unified=3", sha)
+	diff, diffTruncated, err := c.runLimited(ctx, MaxDiffBytes, "show", "--format=", "--no-ext-diff", "--unified=3", sha)
 	if err != nil {
 		return model.Commit{}, fmt.Errorf("cannot read diff for commit %q: %w", sha, err)
 	}
@@ -67,12 +70,13 @@ func (c Client) Commit(ctx context.Context, sha string) (model.Commit, error) {
 	}
 
 	return model.Commit{
-		SHA:     string(parts[0]),
-		Author:  string(parts[1]),
-		Date:    string(parts[2]),
-		Message: strings.TrimSpace(string(parts[3])),
-		Diff:    strings.TrimSpace(string(diff)),
-		Files:   splitNUL(filesOut),
+		SHA:           string(parts[0]),
+		Author:        string(parts[1]),
+		Date:          string(parts[2]),
+		Message:       strings.TrimSpace(string(parts[3])),
+		Diff:          strings.TrimSpace(string(diff)),
+		DiffTruncated: diffTruncated,
+		Files:         splitNUL(filesOut),
 	}, nil
 }
 
@@ -115,6 +119,22 @@ func ReadContext(root, file string, line, radius int) ([]model.ContextLine, erro
 }
 
 func (c Client) run(ctx context.Context, args ...string) ([]byte, error) {
+	var stdout bytes.Buffer
+	if err := c.runTo(ctx, &stdout, args...); err != nil {
+		return nil, err
+	}
+	return stdout.Bytes(), nil
+}
+
+func (c Client) runLimited(ctx context.Context, limit int, args ...string) ([]byte, bool, error) {
+	writer := &limitedWriter{limit: limit}
+	if err := c.runTo(ctx, writer, args...); err != nil {
+		return nil, false, err
+	}
+	return writer.Bytes(), writer.Truncated(), nil
+}
+
+func (c Client) runTo(ctx context.Context, stdout io.Writer, args ...string) error {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
@@ -124,16 +144,47 @@ func (c Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", gitArgs...)
 	cmd.Dir = c.Dir
 	var stderr bytes.Buffer
+	cmd.Stdout = stdout
 	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	err := cmd.Run()
 	if err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
 			message = err.Error()
 		}
-		return nil, fmt.Errorf("%s", message)
+		return fmt.Errorf("%s", message)
 	}
-	return out, nil
+	return nil
+}
+
+type limitedWriter struct {
+	buffer    bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func (w *limitedWriter) Write(data []byte) (int, error) {
+	originalLength := len(data)
+	remaining := w.limit - w.buffer.Len()
+	if remaining <= 0 {
+		w.truncated = w.truncated || originalLength > 0
+		return originalLength, nil
+	}
+	if len(data) > remaining {
+		_, _ = w.buffer.Write(data[:remaining])
+		w.truncated = true
+		return originalLength, nil
+	}
+	_, _ = w.buffer.Write(data)
+	return originalLength, nil
+}
+
+func (w *limitedWriter) Bytes() []byte {
+	return w.buffer.Bytes()
+}
+
+func (w *limitedWriter) Truncated() bool {
+	return w.truncated
 }
 
 func parseBlame(data []byte) (Blame, error) {
